@@ -1,0 +1,18 @@
+# Python virtual environment — never commit this
+.venv/
+
+# Python cache files — generated automatically
+__pycache__/
+*.pyc
+*.pyo
+
+# Log files — too large and machine-specific
+*.log
+
+# Terraform state — contains sensitive infrastructure data
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Environment variables — may contain passwords
+.env
