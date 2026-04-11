@@ -1,0 +1,16 @@
+# ============================================================
+# Ansible Inventory — Equity SRE Lab
+# ============================================================
+# This file tells Ansible which servers to manage.
+# In production this would list real server IPs or hostnames.
+# Format:
+#   [group_name]       ← logical grouping of servers
+#   hostname           ← server to manage
+
+[local]
+localhost ansible_connection=local
+
+# ansible_connection=local tells Ansible not to use SSH
+# and instead run commands directly on this machine.
+# In production you'd use:
+# ansible_connection=ssh ansible_user=ubuntu

@@ -1,0 +1,171 @@
+---
+# ============================================================
+# Playbook: Server Baseline Configuration
+# ============================================================
+# This playbook configures a server to Equity Group's baseline
+# standard. Every new server that joins the infrastructure
+# runs this playbook before being allowed to serve traffic.
+#
+# In a real bank this ensures:
+# - Every server has the same monitoring tools
+# - Every server has the same security settings
+# - No server is missing a critical package
+# ============================================================
+
+# The three dashes at the top (---) mark the start of a YAML
+# file. Always required in Ansible playbooks.
+
+- name: Equity SRE — Server Baseline Configuration
+  # "hosts" tells Ansible which servers from the inventory
+  # to run this playbook on. "all" means every server listed.
+  hosts: all
+
+  # become: true means "use sudo for tasks that need it".
+  # Installing packages and modifying system files requires
+  # root privileges. This is the Ansible equivalent of
+  # putting sudo before a command.
+  become: true
+
+  # Variables defined here are available throughout the
+  # playbook. Centralising them here means you change a
+  # value in one place instead of hunting through every task.
+  vars:
+    # List of packages every server must have
+    required_packages:
+      - curl
+      - wget
+      - git
+      - jq
+      - htop
+      - net-tools
+      - sysstat
+      - unzip
+
+    # Services that must be running and enabled on boot
+    required_services:
+      - docker
+      - apache2
+
+    # The SRE team's monitoring directory
+    monitoring_dir: /opt/sre/monitoring
+
+  # "tasks" is the list of actions to perform, in order.
+  # Each task has a "name" (description) and a module.
+  tasks:
+
+    # ── Task 1: Update apt cache ────────────────────────────
+    - name: Update apt package cache
+      # The "apt" module manages packages on Debian/Ubuntu.
+      # update_cache: true runs "apt-get update" first.
+      # cache_valid_time: 3600 means only update if the cache
+      # is older than 3600 seconds (1 hour) — avoids
+      # unnecessary network calls on repeated runs.
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    # ── Task 2: Install required packages ──────────────────
+    - name: Install required baseline packages
+      apt:
+        # "{{ required_packages }}" references the variable
+        # defined above. The double curly braces are Ansible's
+        # template syntax — Jinja2.
+        name: "{{ required_packages }}"
+        # state: present means "ensure these are installed".
+        # If already installed, Ansible skips this task.
+        # This is idempotency in action.
+        state: present
+
+    # ── Task 3: Create monitoring directory ────────────────
+    - name: Create SRE monitoring directory
+      # The "file" module manages files and directories.
+      file:
+        path: "{{ monitoring_dir }}"
+        # state: directory means "ensure this is a directory".
+        # Creates it if it doesn't exist, does nothing if it does.
+        state: directory
+        # File permissions in octal notation:
+        # 755 = rwxr-xr-x
+        # Owner can read/write/execute
+        # Group and others can read/execute
+        mode: '0755'
+        owner: root
+        group: root
+
+    # ── Task 4: Copy morning health check script ───────────
+    - name: Deploy morning health check script
+      # The "copy" module copies files from the control
+      # machine (your laptop) to the target server.
+      copy:
+        src: "../../scripts/morning_check.sh"
+        dest: "{{ monitoring_dir }}/morning_check.sh"
+        mode: '0755'    # make it executable
+        owner: root
+        group: root
+
+    # ── Task 5: Ensure critical services are running ───────
+    - name: Ensure critical services are running and enabled
+      # The "service" module manages systemd services.
+      # We use "loop" to run the same task for each item
+      # in the required_services list — instead of writing
+      # a separate task for each service.
+      service:
+        # "{{ item }}" is the current value in the loop.
+        # First iteration: item = "docker"
+        # Second iteration: item = "apache2"
+        name: "{{ item }}"
+        state: started    # ensure it's running right now
+        enabled: true     # ensure it starts on boot
+      loop: "{{ required_services }}"
+
+    # ── Task 6: Set system timezone ────────────────────────
+    - name: Set system timezone to Africa/Nairobi
+      # The "timezone" module sets the system timezone.
+      # In a bank all servers must use the same timezone
+      # so log timestamps are consistent across systems.
+      # Inconsistent timezones make incident investigation
+      # very confusing — logs appear out of order.
+      community.general.timezone:
+        name: Africa/Nairobi
+
+    # ── Task 7: Create SRE user ─────────────────────────────
+    - name: Ensure SRE service account exists
+      # The "user" module manages Linux user accounts.
+      user:
+        name: sre-agent
+        # system: true creates a system account — no home
+        # directory, no login shell. Used for running
+        # services, not for human logins.
+        system: true
+        shell: /bin/false   # cannot log in interactively
+        comment: "SRE Automation Agent"
+        state: present
+
+    # ── Task 8: Write server info file ─────────────────────
+    - name: Write server baseline info file
+      # The "copy" module can also write content directly
+      # to a file using "content:" instead of "src:".
+      copy:
+        dest: /etc/sre-baseline
+        content: |
+          # Equity Group Holdings — SRE Baseline
+          # This file confirms the server baseline playbook
+          # has been applied to this server.
+          BASELINE_VERSION=1.0
+          BASELINE_DATE={{ ansible_date_time.date }}
+          MANAGED_BY=ansible
+          TEAM=sre
+        mode: '0644'
+
+  # ── Handlers ───────────────────────────────────────────────
+  # Handlers are special tasks that only run when notified
+  # by another task. They run at the END of the playbook,
+  # even if notified multiple times — they only run once.
+  # Used for things like "restart nginx after config change"
+  # because you only want one restart even if 5 config
+  # files changed.
+  handlers:
+    - name: restart apache2
+      service:
+        name: apache2
+        state: restarted

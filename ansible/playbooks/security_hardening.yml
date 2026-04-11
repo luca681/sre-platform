@@ -1,0 +1,80 @@
+---
+- name: Equity SRE — Security Hardening
+  hosts: all
+  become: true
+
+  vars:
+    audit_dir: /var/log/sre-audit
+    banned_packages:
+      - telnet
+      - rsh-client
+
+  tasks:
+
+    - name: Remove banned insecure packages
+      apt:
+        name: "{{ banned_packages }}"
+        state: absent
+
+    - name: Create security audit log directory
+      file:
+        path: "{{ audit_dir }}"
+        state: directory
+        mode: '0750'
+        owner: root
+        group: adm
+
+    - name: Ensure /etc/passwd has correct permissions
+      file:
+        path: /etc/passwd
+        mode: '0644'
+        owner: root
+        group: root
+
+    - name: Ensure /etc/shadow has correct permissions
+      file:
+        path: /etc/shadow
+        mode: '0640'
+        owner: root
+        group: shadow
+
+    - name: Check if sshd_config exists
+      stat:
+        path: /etc/ssh/sshd_config
+      register: sshd_config_stat
+
+    - name: Check SSH config permissions if SSH is installed
+      file:
+        path: /etc/ssh/sshd_config
+        mode: '0600'
+        owner: root
+        group: root
+      when: sshd_config_stat.stat.exists
+
+    - name: Record security hardening application
+      copy:
+        dest: /etc/sre-security-hardening
+        content: |
+          HARDENING_VERSION=1.0
+          HARDENING_DATE={{ ansible_date_time.date }}
+          HARDENING_TIME={{ ansible_date_time.time }}
+          APPLIED_BY=ansible
+          STATUS=compliant
+        mode: '0644'
+
+    - name: Generate compliance report
+      shell: |
+        echo "=== Equity Group SRE Compliance Report ===" > /tmp/compliance_report.txt
+        echo "Date: $(date)" >> /tmp/compliance_report.txt
+        echo "Host: $(hostname)" >> /tmp/compliance_report.txt
+        echo "OS: $(lsb_release -d | cut -f2)" >> /tmp/compliance_report.txt
+        echo "Kernel: $(uname -r)" >> /tmp/compliance_report.txt
+        echo "Uptime: $(uptime -p)" >> /tmp/compliance_report.txt
+        echo "Security hardening: APPLIED" >> /tmp/compliance_report.txt
+        cat /tmp/compliance_report.txt
+      changed_when: false
+      register: report
+
+    - name: Display compliance report
+      debug:
+        msg: "{{ report.stdout_lines }}"
